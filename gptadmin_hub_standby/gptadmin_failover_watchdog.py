@@ -17,6 +17,11 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
+try:
+    from gptadmin_frpc_processes import config_paths, read_records, write_records, inspect, stop_records
+except ModuleNotFoundError:
+    from scripts.gptadmin_frpc_processes import config_paths, read_records, write_records, inspect, stop_records
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +35,22 @@ DEFAULT_FRPC = "/data/config/frpc-failover.toml"
 DEFAULT_FRPC_PID = "/var/lib/gptadmin/failover_frpc.pid"
 DEFAULT_RECLAIM_COMMAND = "/var/lib/gptadmin/failover_reclaim_command.json"
 DEFAULT_SERVICE = "gptadmin-failover-frpc.service"
+
+
+def maintenance_deadline(value: Any) -> float | None:
+    """Parse an optional finite deadline; a timezone is required."""
+    if value is None or value == "":
+        return None
+    message = "maintenance_until must be an ISO-8601 timestamp with a timezone"
+    if not isinstance(value, str):
+        raise ValueError(message)
+    try:
+        deadline = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if deadline.tzinfo is None or deadline.utcoffset() is None:
+            raise ValueError(message)
+        return deadline.timestamp()
+    except (ValueError, OverflowError, OSError) as exc:
+        raise ValueError(message) from exc
 
 
 def load_json(path: str, default: Any) -> Any:
@@ -245,27 +266,11 @@ def demote(args: argparse.Namespace, runtime: dict[str, Any], dry_run: bool) -> 
     if args.frpc_service and args.frpc_service != "none":
         run(["systemctl", "stop", args.frpc_service], dry_run)
     else:
-        pids: list[int] = []
-        if Path(args.frpc_pid_file).exists():
-            for raw in Path(args.frpc_pid_file).read_text().splitlines():
-                try:
-                    pids.append(int(raw.strip()))
-                except ValueError:
-                    continue
-        if not pids and runtime.get("frpc_pid"):
-            pids = [int(runtime["frpc_pid"])]
-        for pid in pids:
-            if pid <= 1:
-                continue
-            if dry_run:
-                print("DRY-RUN kill", pid)
-            else:
-                try:
-                    os.kill(pid, 15)
-                except ProcessLookupError:
-                    pass
-        if not dry_run:
-            Path(args.frpc_pid_file).unlink(missing_ok=True)
+        paths = [Path(args.frpc_config)] + config_paths(args.frpc_config, 16)
+        if dry_run:
+            print("DRY-RUN stop recorded owned FRP clients")
+        else:
+            stop_records(args.frpc_pid_file, args.frpc_bin, paths)
     runtime["frpc_pid"] = 0
     runtime["last_demote_at"] = time.time()
 
@@ -283,7 +288,7 @@ def promote(args: argparse.Namespace, cfg: dict[str, Any], bundle: dict[str, Any
         text = build_frpc_config(bundle, local_port, args.node_id, idx)
         if dry_run:
             print("DRY-RUN write", path)
-            print(text)
+            print("FRP credentials omitted")
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -293,17 +298,47 @@ def promote(args: argparse.Namespace, cfg: dict[str, Any], bundle: dict[str, Any
     if args.frpc_service and args.frpc_service != "none":
         run(["systemctl", "restart", args.frpc_service], dry_run)
     else:
-        pids: list[int] = []
+        existing = read_records(args.frpc_pid_file, args.frpc_bin, config_paths)
+        if len(existing) == len(config_paths) and {r['config'] for r in existing} == {str(p.absolute()) for p in config_paths}:
+            # A prolonged primary outage must not spawn another set every
+            # promotion cooldown and discard the previous clients' owners.
+            return
+        if existing and not dry_run:
+            stop_records(args.frpc_pid_file, args.frpc_bin, config_paths)
+        records = []
         for path in config_paths:
             if dry_run:
                 print("DRY-RUN", args.frpc_bin, "-c", path)
             else:
-                proc = subprocess.Popen([args.frpc_bin, "-c", str(path)], start_new_session=True)
-                pids.append(proc.pid)
-        if not dry_run:
-            Path(args.frpc_pid_file).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.frpc_pid_file).write_text("\n".join(str(pid) for pid in pids) + "\n")
-            os.chmod(args.frpc_pid_file, 0o600)
+                # A crash/write failure after Popen must not permit another
+                # launch with an unregistered child. Persist the hold first.
+                Path(args.frpc_pid_file).parent.mkdir(parents=True, exist_ok=True)
+                write_records(args.frpc_pid_file, records, pending=True)
+                proc = None
+                previous = list(records)
+                try:
+                    proc = subprocess.Popen([args.frpc_bin, "-c", str(path)], start_new_session=True)
+                    record = inspect(proc.pid, args.frpc_bin, config_paths)
+                    if record is None:
+                        raise RuntimeError('new FRP client exited before owner registration')
+                    records.append(record)
+                    # Retain each successful owner before starting another.
+                    write_records(args.frpc_pid_file, records)
+                except BaseException:
+                    # This unreaped child belongs to this Popen invocation;
+                    # terminate/wait protects against PID reuse and handles
+                    # first-write failure before a registry owner exists.
+                    if proc is not None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                    # Only a confirmed terminal child releases the hold. If
+                    # reaping or this write fails, future launches fail closed.
+                    write_records(args.frpc_pid_file, previous)
+                    raise
 
 
 def check_once(args: argparse.Namespace) -> int:
@@ -324,6 +359,17 @@ def check_once(args: argparse.Namespace) -> int:
         runtime["last_decision"] = "reclaimed_primary"
         save_json(args.runtime_state, runtime)
         print(json.dumps({"ok": True, "decision": "reclaimed_primary", "node_id": args.node_id, "nonce": reclaim.get("nonce"), "dry_run": args.dry_run}, sort_keys=True))
+        return 0
+
+    try:
+        maintenance_until = maintenance_deadline(cfg.get("maintenance_until"))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if maintenance_until is not None and runtime["last_check_at"] < maintenance_until:
+        runtime["fail_count"] = 0
+        runtime["last_decision"] = "maintenance"
+        save_json(args.runtime_state, runtime)
+        print(json.dumps({"ok": True, "decision": "maintenance", "node_id": args.node_id, "maintenance_until": cfg["maintenance_until"]}, sort_keys=True))
         return 0
 
     if not cfg.get("enabled") or not node.get("enabled", True):

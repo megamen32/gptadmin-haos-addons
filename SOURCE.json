@@ -1,6 +1,6 @@
 {
-  "source_ref": "ac460d0e2bf6b59face6cf5b3adc12851f31a93c",
-  "app_version": "1.0.6",
+  "source_ref": "13f6edc9b3742b6e114fcbf483be97c17dea5ed6",
+  "app_version": "1.0.7",
   "architecture": "aarch64",
-  "image": "ghcr.io/megamen32/gptadmin-opensource-haos-hub-standby"
+  "image": "ghcr.io/megamen32/gptadmin-haos-addons"
 }

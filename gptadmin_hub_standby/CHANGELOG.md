@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.24
+
+- Report the failing FRP ownership check without exposing process arguments.
+
+## 1.0.23
+
+- Allow explicitly configured legacy public origins for existing OAuth and managed bearer credentials.
+
+## 1.0.22
+
+- Keep executor queue polls and their accepted callbacks visible during drain.
+
+## 1.0.21
+
+- Protect and recover undispatched quorum jobs after a leader change, without replaying started jobs.
+- Route enrolled executor work through the quorum leader and prevent unsafe follower drain.
+
 ## 1.0.20
 
 - Authenticate a follower’s local executor against the quorum leader over enrolled mutual TLS.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.33
+
+- Preserve both Nodes' task histories during a single-writer handoff.
+
+## 1.0.32
+
+- Support a locked final authorization export from a stopped writer.
+
+## 1.0.31
+
+- Support an explicitly prepared single-writer Node on HAOS without a quorum dependency.
+
+## 1.0.30
+
+- Let already accepted local tasks complete during a safe node drain.
+
 ## 1.0.29
 
 - Support an explicit list of exact HTTPS OAuth callbacks for trusted existing clients.

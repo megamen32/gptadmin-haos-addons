@@ -1,6 +1,6 @@
 name: GPTAdmin Hub Standby
 # The exporter replaces this template version with 1.0.<Node VERSION>.
-version: "1.0.1098"
+version: "1.0.1099"
 slug: gptadmin_hub_standby
 description: "GPTAdmin Hub with an optional unified HAOS Node and automatic failover"
 url: "https://github.com/megamen32/gptadmin-haos-addons"

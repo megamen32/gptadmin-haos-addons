@@ -1,6 +1,6 @@
 name: GPTAdmin Hub Standby
 # The exporter replaces this template version with 1.0.<Node VERSION>.
-version: "1.0.1148"
+version: "1.0.1149"
 slug: gptadmin_hub_standby
 description: "GPTAdmin Hub with an optional unified HAOS Node and automatic failover"
 url: "https://github.com/megamen32/gptadmin-haos-addons"
@@ -33,6 +33,7 @@ options:
   node_mode: "legacy"
   quorum_enabled: false
   quorum_ingress_checks: false
+  offline_durable_bearer: false
   offline_shared_signer: false
   hub_host: "0.0.0.0"
   hub_port: 9001
@@ -59,6 +60,7 @@ schema:
   node_mode: str
   quorum_enabled: bool
   quorum_ingress_checks: bool
+  offline_durable_bearer: bool?
   offline_shared_signer: bool
   hub_host: str
   hub_port: int

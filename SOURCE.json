@@ -1,7 +1,7 @@
 {
-  "source_ref": "64a17bd2daad6edd91f36983de01ba60e8a997da",
-  "app_version": "1.0.1155",
-  "node_version": "1155",
+  "source_ref": "c94d9efdfdf0c46f802a733c81958662da5d2837",
+  "app_version": "1.0.1156",
+  "node_version": "1156",
   "architecture": "aarch64",
   "image": "ghcr.io/megamen32/gptadmin-haos-addons"
 }
